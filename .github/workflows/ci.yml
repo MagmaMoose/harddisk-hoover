@@ -1,0 +1,89 @@
+# Lint and unit tests for the scripts, lint and schema validation for the chart, and the
+# end-to-end run on kind and on k3s: a dry-run sweep, a real one and a skipped one,
+# checked against what is actually left on the nodes.
+#
+# Its own file, not a step in release.yml, security.yml or quality.yml: those are
+# rewritten from org-wide templates by Caldrith provisioning.
+#
+# All actions are SHA-pinned; the trailing comment is the tag each SHA corresponds to.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'LICENSE', '.gitignore']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: shellcheck
+        run: shellcheck -x src/*.sh tests/*.sh
+      # Inside the image, so the tests exercise the bash, GNU find and coreutils the
+      # cleanup ships with rather than the runner's.
+      - name: Unit tests
+        run: tests/run.sh
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: yokawasa/action-setup-kube-tools@b16d49b2c459d33cf9d4c300a220ef0bcdbc730a # v0.14.0
+        with:
+          setup-tools: kubeconform
+          kubeconform: '0.6.7'
+      - name: helm lint
+        run: |
+          set -euo pipefail
+          helm lint charts/harddisk-hoover
+          helm lint charts/harddisk-hoover --values charts/harddisk-hoover/ci/default-values.yaml
+      # The defaults and the CI values (everything on), against the real API schemas.
+      # The cleanup pod is a template inside a ConfigMap, so it is pulled out and
+      # validated on its own with a node name filled in.
+      - name: Render and validate
+        run: |
+          set -euo pipefail
+          for values in "" "--values charts/harddisk-hoover/ci/default-values.yaml"; do
+            # shellcheck disable=SC2086
+            helm template t charts/harddisk-hoover --namespace hoover $values >rendered.yaml
+            kubeconform -strict -summary -kubernetes-version 1.33.0 -schema-location default rendered.yaml
+            yq 'select(.kind == "ConfigMap") | .data["cleanup-pod.yaml"]' rendered.yaml \
+              | sed -e 's/__NODE_NAME__/node-1/g' -e 's/__RUN_ID__/20260101000000/g' >pod.yaml
+            kubeconform -strict -summary -kubernetes-version 1.33.0 -schema-location default pod.yaml
+          done
+
+  e2e:
+    needs: [scripts, chart]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flavour: [kind, k3s]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - name: Tool versions
+        run: |
+          docker version --format '{{.Server.Version}}'
+          kind version
+          kubectl version --client
+          helm version --short
+      - name: End to end (${{ matrix.flavour }})
+        run: tests/e2e.sh ${{ matrix.flavour }}

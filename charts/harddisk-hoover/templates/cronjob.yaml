@@ -1,0 +1,117 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "harddisk-hoover.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harddisk-hoover.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  schedule: {{ .Values.schedule | quote }}
+  {{- with .Values.timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
+  suspend: {{ .Values.suspend }}
+  # One sweep at a time: a sweep that overruns its slot makes the next one wait.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ int .Values.controller.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: {{ int .Values.controller.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ int .Values.controller.failedJobsHistoryLimit }}
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "harddisk-hoover.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: controller
+    spec:
+      # A failed sweep is not retried: the next scheduled one starts from scratch.
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ int .Values.controller.activeDeadlineSeconds }}
+      ttlSecondsAfterFinished: {{ int .Values.controller.ttlSecondsAfterFinished }}
+      template:
+        metadata:
+          labels:
+            {{- include "harddisk-hoover.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: controller
+            {{- with .Values.controller.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.controller.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          serviceAccountName: {{ include "harddisk-hoover.controllerServiceAccount" . }}
+          # The controller is the one pod here that calls the Kubernetes API.
+          automountServiceAccountToken: true
+          enableServiceLinks: false
+          restartPolicy: Never
+          {{- with .Values.controller.priorityClassName }}
+          priorityClassName: {{ . }}
+          {{- end }}
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.controller.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: controller
+              image: {{ include "harddisk-hoover.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["/usr/local/bin/hoover-controller"]
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: HOOVER_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                - name: HOOVER_INSTANCE
+                  value: {{ .Release.Name | quote }}
+                - name: HOOVER_POD_TEMPLATE
+                  value: /etc/harddisk-hoover/cleanup-pod.yaml
+                - name: HOOVER_NODE_SELECTOR
+                  value: {{ .Values.nodes.selector | quote }}
+                - name: HOOVER_SKIP_UNSCHEDULABLE
+                  value: {{ .Values.nodes.skipUnschedulable | quote }}
+                - name: HOOVER_POD_TIMEOUT_SECONDS
+                  value: {{ int .Values.nodes.podTimeoutSeconds | quote }}
+                - name: HOOVER_PAUSE_SECONDS
+                  value: {{ int .Values.nodes.pauseSeconds | quote }}
+                - name: HOOVER_KEEP_PODS
+                  value: {{ .Values.cleanup.keepPods | quote }}
+              {{- with .Values.controller.securityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- with .Values.controller.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: template
+                  mountPath: /etc/harddisk-hoover
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: template
+              configMap:
+                name: {{ include "harddisk-hoover.fullname" . }}
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
+          {{- with .Values.controller.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.controller.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.controller.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}

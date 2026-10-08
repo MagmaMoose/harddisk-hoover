@@ -1,0 +1,12 @@
+# The cleanup pod the controller creates on each node, with __NODE_NAME__ and __RUN_ID__
+# left for it to fill in.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "harddisk-hoover.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harddisk-hoover.labels" . | nindent 4 }}
+data:
+  cleanup-pod.yaml: |
+    {{- include "harddisk-hoover.cleanupPod" . | nindent 4 }}

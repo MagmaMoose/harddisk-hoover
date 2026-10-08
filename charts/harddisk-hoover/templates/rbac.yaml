@@ -1,0 +1,63 @@
+# The controller may manage pods in this namespace only (create one per node, read its
+# phase and log, delete it) and list the nodes. Creating pods here is creating
+# privileged pods, so treat this account like the node access it amounts to.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "harddisk-hoover.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harddisk-hoover.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "harddisk-hoover.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "harddisk-hoover.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "harddisk-hoover.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "harddisk-hoover.controllerServiceAccount" . }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "harddisk-hoover.clusterName" . }}
+  labels:
+    {{- include "harddisk-hoover.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "harddisk-hoover.clusterName" . }}
+  labels:
+    {{- include "harddisk-hoover.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "harddisk-hoover.clusterName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "harddisk-hoover.controllerServiceAccount" . }}
+    namespace: {{ .Release.Namespace }}

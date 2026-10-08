@@ -1,0 +1,33 @@
+misconfigurations:
+  # DS-0026: no HEALTHCHECK. Both roles are batch pods that exit when done; there is no
+  # long-running process for a health check to probe, and Kubernetes owns the lifecycle.
+  - id: DS-0026
+    paths:
+      - Dockerfile
+
+  # KSV-0011: no CPU limit, on purpose. A throttled controller only takes longer; memory
+  # is limited.
+  - id: KSV-0011
+    paths:
+      - charts/harddisk-hoover/templates/cronjob.yaml
+  - id: KSV0011
+    paths:
+      - charts/harddisk-hoover/templates/cronjob.yaml
+
+  # KSV-0048: the Role lets the controller create and delete pods. That is its whole job:
+  # one cleanup pod per node, in its own namespace only.
+  - id: KSV-0048
+    paths:
+      - charts/harddisk-hoover/templates/rbac.yaml
+  - id: KSV0048
+    paths:
+      - charts/harddisk-hoover/templates/rbac.yaml
+
+  # KSV-0125: "untrusted registry". ghcr.io/magmamoose is where this project publishes its
+  # own image; the chart exists to deploy exactly that image.
+  - id: KSV-0125
+    paths:
+      - charts/harddisk-hoover/templates/cronjob.yaml
+  - id: KSV0125
+    paths:
+      - charts/harddisk-hoover/templates/cronjob.yaml
