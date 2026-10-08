@@ -474,16 +474,20 @@ unused_images() {
     log "no pod sandbox named its image, so the pause image cannot be told apart" >&2
     return 1
   fi
-  jq -r --argjson containers "$containers" --argjson sandboxes "$sandbox_refs" "$JQ_NORMALISE"'
-    ([$containers.containers[] | .imageRef, .image.image] | map(select(. != null and . != ""))) as $used
+  # The three documents go in on stdin, not as --argjson: a busy node's `crictl ps -a` is
+  # well over the kernel's 128 KiB limit for one argument, and jq then never starts
+  # ("Argument list too long"). printf is a bash builtin, so it has no such limit.
+  printf '%s\n%s\n%s\n' "$images" "$containers" "$sandbox_refs" | jq -rn "$JQ_NORMALISE"'
+    input as $images | input as $containers | input as $sandboxes
+    | ([$containers.containers[] | .imageRef, .image.image] | map(select(. != null and . != ""))) as $used
     | ($sandboxes | map(norm)) as $sandbox
-    | .images[]
+    | $images.images[]
     | select((.pinned // false) | not)
     | select(.id as $id | $used | index($id) | not)
     | select(([.id] + (.repoTags // []) + (.repoDigests // [])) as $refs
              | any($sandbox[]; . as $s | $refs | index($s)) | not)
     | [.id, (.size | tostring), ((.repoTags // [])[0] // (.repoDigests // [])[0] // .id)] | @tsv
-  ' <<<"$images"
+  '
 }
 
 # Largest first, so the fewest images are pulled again later. With
