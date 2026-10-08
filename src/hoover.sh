@@ -33,6 +33,7 @@ POD_LOG_MAX_AGE_DAYS="${HOOVER_POD_LOG_MAX_AGE_DAYS:-7}"
 CORE_DUMP_MIN_SIZE="${HOOVER_CORE_DUMP_MIN_SIZE:-50M}"
 JOURNAL_MAX_SIZE="${HOOVER_JOURNAL_MAX_SIZE:-100M}"
 CONTAINER_MIN_AGE_HOURS="${HOOVER_EXITED_CONTAINER_MIN_AGE_HOURS:-24}"
+IMAGES_TARGET="${HOOVER_IMAGES_TARGET_PERCENT:-0}"
 CRI_SOCKET="${HOOVER_CRI_SOCKET:-}"
 PREFLIGHT="${HOOVER_PREFLIGHT:-true}"
 NODE="${NODE_NAME:-$(hostname)}"
@@ -83,8 +84,9 @@ to_bytes() { numfmt --from=iec "$1"; }
 
 human() { numfmt --to=iec --suffix=B "$1"; }
 
-# "<used %> <inode used %> <available bytes>" for a path, from the point of view of the
-# kubelet: used is everything that is not available, so root-reserved blocks count as used.
+# "<used %> <inode used %> <available bytes> <size bytes>" for a path, from the point of
+# view of the kubelet: used is everything that is not available, so root-reserved blocks
+# count as used.
 fs_usage() {
   local size avail itotal iavail pct ipct=0
   read -r size avail itotal iavail < <(df -B1 --output=size,avail,itotal,iavail "$1" | tail -n 1)
@@ -92,7 +94,7 @@ fs_usage() {
   if [[ "$itotal" =~ ^[0-9]+$ ]] && ((itotal > 0)); then
     ipct=$(((itotal - iavail) * 100 / itotal))
   fi
-  echo "$pct $ipct $avail"
+  echo "$pct $ipct $avail $size"
 }
 
 # Every path a host process holds open, so the delete steps can leave those alone. With
@@ -421,15 +423,36 @@ unused_images() {
   ' <<<"$images"
 }
 
+# Largest first, so the fewest images are pulled again later. With
+# HOOVER_IMAGES_TARGET_PERCENT set, it stops once the node is that full or less, which
+# keeps the rest cached; at 0 every unused image goes. A dry run cannot measure as it
+# goes, so it projects from the image sizes, which overstates what shared layers free.
 step_images() {
-  local list id size ref count=0 bytes=0 failed=0
-  log "== Removing images nothing on the node uses"
-  if ! list=$(unused_images); then
+  local list id size ref count=0 bytes=0 kept=0 pct avail fs_size used
+  if ((IMAGES_TARGET > 0)); then
+    log "== Removing images nothing on the node uses, largest first, until / is ${IMAGES_TARGET}% used"
+  else
+    log "== Removing images nothing on the node uses"
+  fi
+  if ! list=$(unused_images | sort -t $'\t' -k2,2nr); then
     error "could not list the runtime's images, containers or pods"
     return
   fi
+  read -r pct _ avail fs_size < <(fs_usage "$HOST$THRESHOLD_PATH")
+  used=$((fs_size - avail))
   while IFS=$'\t' read -r id size ref; do
     [[ -n "$id" ]] || continue
+    if ((IMAGES_TARGET > 0)); then
+      if dry_run; then
+        pct=$(((used - bytes) * 100 / fs_size))
+      else
+        read -r pct _ _ _ < <(fs_usage "$HOST$THRESHOLD_PATH")
+      fi
+      if ((pct <= IMAGES_TARGET)); then
+        kept=$((kept + 1))
+        continue
+      fi
+    fi
     if dry_run; then
       log "  would remove $ref ($(human "$size"))"
     elif crictl_ rmi "$id" >/dev/null 2>&1; then
@@ -437,16 +460,15 @@ step_images() {
     else
       # Most likely a container started with it since the list was made.
       warn "the runtime refused to remove $ref"
-      failed=$((failed + 1))
       continue
     fi
     count=$((count + 1))
     bytes=$((bytes + size))
   done <<<"$list"
   if dry_run; then
-    log "  would remove $count image(s), up to $(human "$bytes") before shared layers"
+    log "  would remove $count image(s), up to $(human "$bytes") before shared layers; would keep $kept unused"
   else
-    log "  removed $count image(s), up to $(human "$bytes") before shared layers"
+    log "  removed $count image(s), up to $(human "$bytes") before shared layers; kept $kept unused"
   fi
 }
 
@@ -480,7 +502,7 @@ main() {
     result error 0 0 0
     exit 2
   fi
-  read -r pct ipct avail_before < <(fs_usage "$HOST$THRESHOLD_PATH")
+  read -r pct ipct avail_before _ < <(fs_usage "$HOST$THRESHOLD_PATH")
   log "$THRESHOLD_PATH is ${pct}% used (inodes ${ipct}%), $(human "$avail_before") available"
 
   if ((THRESHOLD > 0 && pct < THRESHOLD && ipct < THRESHOLD)); then
@@ -505,7 +527,7 @@ main() {
     fi
   fi
 
-  read -r pct_after _ avail_after < <(fs_usage "$HOST$THRESHOLD_PATH")
+  read -r pct_after _ avail_after _ < <(fs_usage "$HOST$THRESHOLD_PATH")
   freed=$((avail_after - avail_before))
   ((freed < 0)) && freed=0
   mode=cleaned

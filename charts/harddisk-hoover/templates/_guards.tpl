@@ -15,6 +15,11 @@ Included once from NOTES.txt so they run on template, install and upgrade.
 {{- fail (printf "threshold.percent is %d; it is a percentage, from 0 (clean every node) to 100." $p) }}
 {{- end }}
 
+{{- $t := int .Values.limits.imagesTargetPercent }}
+{{- if or (lt $t 0) (gt $t 100) }}
+{{- fail (printf "limits.imagesTargetPercent is %d; it is a percentage, from 0 (remove every unused image) to 100." $t) }}
+{{- end }}
+
 {{- if not (hasPrefix "/" .Values.threshold.path) }}
 {{- fail (printf "threshold.path %q must be an absolute path on the node." .Values.threshold.path) }}
 {{- end }}

@@ -15,6 +15,7 @@ nodes:
 steps:
   packageCache: false
 limits:
+  imagesTargetPercent: 50
   logDirs:
     - /var/log
     - /var/lib/rancher/k3s/agent/logs

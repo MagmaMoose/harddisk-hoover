@@ -58,7 +58,8 @@ steps:
   packageCache: true
   # Remove containers that exited more than exitedContainerMinAgeHours ago.
   exitedContainers: true
-  # Remove images that no container, running or exited, uses. Pinned images stay.
+  # Remove images that no container (running or exited), no pod sandbox and no pin
+  # keeps, largest first, down to limits.imagesTargetPercent.
   images: true
 
 limits:
@@ -71,6 +72,10 @@ limits:
   coreDumpMinSize: 50M
   journalMaxSize: 100M
   exitedContainerMinAgeHours: 24
+  # The images step removes unused images largest first and stops once threshold.path is
+  # at most this full, so the rest stay cached and are not pulled again. 0 removes every
+  # unused image.
+  imagesTargetPercent: 0
 
 # The container runtime's socket on the node. Empty finds it: k3s, RKE2, containerd,
 # CRI-O, k0s and MicroK8s locations are tried in turn.

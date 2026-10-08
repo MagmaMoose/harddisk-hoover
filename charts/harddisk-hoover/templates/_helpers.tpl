@@ -153,6 +153,8 @@ spec:
           value: {{ .Values.limits.journalMaxSize | quote }}
         - name: HOOVER_EXITED_CONTAINER_MIN_AGE_HOURS
           value: {{ int .Values.limits.exitedContainerMinAgeHours | quote }}
+        - name: HOOVER_IMAGES_TARGET_PERCENT
+          value: {{ int .Values.limits.imagesTargetPercent | quote }}
         - name: HOOVER_CRI_SOCKET
           value: {{ .Values.criSocket | quote }}
       securityContext:

@@ -44,7 +44,7 @@ Each step can be turned off. In order:
 | `journal` | `journalctl --vacuum-size=<journalMaxSize>` (100M) on the host, which removes archived journal files only. |
 | `package-cache` | `apt-get clean`, or `dnf`/`yum`/`zypper`'s equivalent, on the host. A busy package manager is a warning, not a failure. |
 | `exited-containers` | Removes containers that exited more than `exitedContainerMinAgeHours` (24) ago, without `--force`. |
-| `images` | Removes images that no container (running or exited), no pod sandbox and no pin keeps. |
+| `images` | Removes images that no container (running or exited), no pod sandbox and no pin keeps, largest first. With `imagesTargetPercent` set it stops once the node is that full or less, so the rest stay cached. |
 
 Rules the steps keep, whatever the settings:
 
@@ -103,6 +103,7 @@ ones you are most likely to set:
 | `nodes.skipUnschedulable` | `true` | Leave cordoned nodes alone. |
 | `steps.*` | all `true` | Turn steps off. |
 | `limits.*` | see above | Sizes and ages the steps use. |
+| `limits.imagesTargetPercent` | `0` | Stop removing images once the node is this full or less. 0 removes every unused image. |
 | `criSocket` | found | The runtime socket, if it is somewhere unusual. |
 | `networkPolicy.apiServer` | `0.0.0.0/0` on 443 and 6443 | Where the controller may reach the API server. |
 
@@ -112,14 +113,17 @@ threshold (`imageGCHighThresholdPercent`, 85 by default) if you want the sweep t
 before the kubelet does, and leave enough headroom for the largest burst of image
 pulls your nodes see between two runs.
 
-Removing every unused image makes the next pod that needs one pull it again. On
+Every image removed is pulled again by the next pod that needs it, which counts against
+registry rate limits (Docker Hub's anonymous limit is low). Set `imagesTargetPercent` a
+little under the threshold so a sweep removes only as much as it needs to. On
 air-gapped nodes that rely on images loaded at install time, turn the `images` step off.
 
 The cleanup reads these environment variables, which the chart sets from the values
 above: `HOOVER_DRY_RUN`, `HOOVER_THRESHOLD_PERCENT`, `HOOVER_THRESHOLD_PATH`,
 `HOOVER_STEPS` (comma-separated step names), `HOOVER_LOG_DIRS`, `HOOVER_LOG_MAX_SIZE`,
 `HOOVER_POD_LOG_MAX_AGE_DAYS`, `HOOVER_CORE_DUMP_MIN_SIZE`, `HOOVER_JOURNAL_MAX_SIZE`,
-`HOOVER_EXITED_CONTAINER_MIN_AGE_HOURS` and `HOOVER_CRI_SOCKET`.
+`HOOVER_EXITED_CONTAINER_MIN_AGE_HOURS`, `HOOVER_IMAGES_TARGET_PERCENT` and
+`HOOVER_CRI_SOCKET`.
 
 ## Security
 

@@ -239,6 +239,31 @@ EOF
   [[ "$output" == *"removed 1 image(s)"* ]]
 }
 
+@test "removes the largest unused image first" {
+  image_fixtures
+  cat >"$CRI_DIR/images.json" <<'EOF'
+{"images": [
+  {"id": "sha256:small", "repoTags": ["docker.io/library/small:1"], "size": "100"},
+  {"id": "sha256:big", "repoTags": ["docker.io/library/big:1"], "size": "900000"},
+  {"id": "sha256:mid", "repoTags": ["docker.io/library/mid:1"], "size": "5000"}
+]}
+EOF
+  export HOOVER_STEPS=images
+  run_hoover
+  [ "$status" -eq 0 ]
+  [ "$(grep '^crictl rmi ' "$CALLS" | tr '\n' ' ')" = "crictl rmi sha256:big crictl rmi sha256:mid crictl rmi sha256:small " ]
+}
+
+@test "stops removing images once the node is under the image target" {
+  image_fixtures
+  # Any real filesystem is under 100% used, so nothing needs to go.
+  export HOOVER_STEPS=images HOOVER_IMAGES_TARGET_PERCENT=100
+  run_hoover
+  [ "$status" -eq 0 ]
+  ! grep -q '^crictl rmi ' "$CALLS"
+  [[ "$output" == *"removed 0 image(s)"*"kept 1 unused"* ]]
+}
+
 @test "dry run changes nothing and says what it would do" {
   mkfile "$H/var/log/big.log" 3
   echo a >"$H/var/log/syslog.1"
