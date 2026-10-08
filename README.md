@@ -43,7 +43,7 @@ Each step can be turned off. In order:
 | `core-dumps` | Deletes `core.<pid>` files over `coreDumpMinSize` (50M) in `/var/log` and in running containers' writable layers, and empties `/var/lib/systemd/coredump`. Files written to in the last ten minutes are left alone. |
 | `journal` | `journalctl --vacuum-size=<journalMaxSize>` (100M) on the host, which removes archived journal files only. |
 | `package-cache` | `apt-get clean`, or `dnf`/`yum`/`zypper`'s equivalent, on the host. A busy package manager is a warning, not a failure. |
-| `exited-containers` | Removes containers that exited more than `exitedContainerMinAgeHours` (24) ago, without `--force`. |
+| `exited-containers` | Removes containers that exited more than `exitedContainerMinAgeHours` (24) ago, of pods that are gone (sandbox no longer Ready), without `--force`. |
 | `images` | Removes images that no container (running or exited), no pod sandbox and no pin keeps, largest first. With `imagesTargetPercent` set it stops once the node is that full or less, so the rest stay cached. |
 
 Rules the steps keep, whatever the settings:
@@ -60,8 +60,18 @@ Rules the steps keep, whatever the settings:
   host's mount table. Files inside image layers are never touched.
 - Recently exited containers keep their logs, so `kubectl logs --previous` still works
   for a recent crash.
+- A pod that is still running keeps every exited container, however old: its init
+  containers and the previous instance of a restarted one. The kubelet needs an init
+  container's record, or it runs the init containers again the next time the pod's
+  main container exits. A container whose pod cannot be told is kept too.
 - The pause image survives even on runtimes that do not pin it. (`crictl rmi --prune`
-  counts containers only, which is why the cleanup does not use it.)
+  counts containers only, which is why the cleanup does not use it.) The images step
+  fails closed: if the runtime cannot list its sandboxes, cannot inspect one that still
+  exists, or a running sandbox does not name its image, no image is removed and the
+  run reports an error.
+- The node's `/` is mounted with `HostToContainer` propagation, so a volume the node
+  unmounts during a run (a CSI or Longhorn unstage) is released in the cleanup pod too.
+  That needs `/` to be a shared mount on the node, which it is under systemd.
 
 ## Install
 

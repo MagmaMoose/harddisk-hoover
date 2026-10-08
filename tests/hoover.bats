@@ -30,7 +30,20 @@ case "$*" in
   "rmi "*) exit 0 ;;
   "images -o json") cat "$CRI_DIR/images.json" ;;
   "ps -a -o json") cat "$CRI_DIR/ps.json" ;;
-  "pods -q") cat "$CRI_DIR/pods" 2>/dev/null ;;
+  "pods --state ready -o json")
+    [[ -e "$CRI_DIR/ready-fail" ]] && exit 1
+    cat "$CRI_DIR/ready.json" 2>/dev/null || echo '{"items": []}'
+    ;;
+  "pods -q")
+    [[ -e "$CRI_DIR/pods-fail" ]] && exit 1
+    cat "$CRI_DIR/pods" 2>/dev/null
+    ;;
+  # The sandboxes that exist when one is looked up again: pods-now when a test sets it.
+  "pods -q --id "*)
+    now="$CRI_DIR/pods-now"
+    [[ -e "$now" ]] || now="$CRI_DIR/pods"
+    grep -x "$4" "$now" || true
+    ;;
   "inspectp -o json "*) cat "$CRI_DIR/pod-${4}.json" ;;
   *) exit 1 ;;
 esac
@@ -188,6 +201,13 @@ EOF
   ! grep -q nsenter "$CALLS"
 }
 
+# exited_container <name> <finishedAt> <sandbox id> <pod uid>: writes c-<name>.json as
+# `crictl inspect` reports it.
+exited_container() {
+  printf '{"status":{"finishedAt":"%s","metadata":{"name":"app"},"labels":{"io.kubernetes.pod.namespace":"ns","io.kubernetes.pod.name":"p","io.kubernetes.pod.uid":"%s"}},"info":{"sandboxID":"%s"}}' \
+    "$2" "$4" "$3" >"$CRI_DIR/c-$1.json"
+}
+
 @test "removes only containers that exited more than the minimum age ago" {
   local old new never
   old=$(date -u -d '30 hours ago' +%Y-%m-%dT%H:%M:%S.000000000Z)
@@ -196,7 +216,7 @@ EOF
   for c in old new; do
     v=$old
     [ "$c" = new ] && v=$new
-    printf '{"status":{"finishedAt":"%s","metadata":{"name":"app"},"labels":{"io.kubernetes.pod.namespace":"ns","io.kubernetes.pod.name":"p"}}}' "$v" >"$CRI_DIR/c-$c.json"
+    exited_container "$c" "$v" "s-$c" "u-$c"
   done
   echo '{"status":{"finishedAt":"0001-01-01T00:00:00Z"}}' >"$CRI_DIR/c-never.json"
   echo '{"status":{"finishedAt":"yesterday-ish"}}' >"$CRI_DIR/c-bad.json"
@@ -208,7 +228,38 @@ EOF
   ! grep -q 'crictl rm c-never' "$CALLS"
   ! grep -q 'crictl rm c-bad' "$CALLS"
   ! grep -q -- '--force\|-f ' "$CALLS"
-  [[ "$output" == *"removed 1 container(s), kept 3"* ]]
+  [[ "$output" == *"removed 1 container(s), kept 3, and 0 of running pods"* ]]
+}
+
+@test "keeps the exited containers of a pod that is still running" {
+  local old
+  old=$(date -u -d '30 hours ago' +%Y-%m-%dT%H:%M:%S.000000000Z)
+  echo '{"items": [{"id": "s-run", "metadata": {"name": "web", "uid": "u-run"}}]}' >"$CRI_DIR/ready.json"
+  printf '%s\n' c-init c-prev c-gone c-unknown >"$CRI_DIR/exited"
+  # An init container in the running sandbox, and one from the same pod's earlier sandbox.
+  exited_container init "$old" s-run u-run
+  exited_container prev "$old" s-before u-run
+  exited_container gone "$old" s-gone u-gone
+  # No sandbox and no pod UID: which pod it belongs to cannot be told.
+  printf '{"status":{"finishedAt":"%s"}}' "$old" >"$CRI_DIR/c-unknown.json"
+  export HOOVER_STEPS=exited-containers HOOVER_EXITED_CONTAINER_MIN_AGE_HOURS=24
+  run_hoover
+  [ "$status" -eq 0 ]
+  grep -qx 'crictl rm c-gone' "$CALLS"
+  [ "$(grep -c '^crictl rm ' "$CALLS")" -eq 1 ]
+  [[ "$output" == *"removed 1 container(s), kept 1, and 2 of running pods"* ]]
+}
+
+@test "removes no container when the running pods cannot be listed" {
+  printf '%s\n' c-old >"$CRI_DIR/exited"
+  exited_container old "$(date -u -d '30 hours ago' +%Y-%m-%dT%H:%M:%SZ)" s-old u-old
+  touch "$CRI_DIR/ready-fail"
+  export HOOVER_STEPS=exited-containers
+  run_hoover
+  [ "$status" -eq 1 ]
+  ! grep -q '^crictl rm ' "$CALLS"
+  [[ "$output" == *"could not list the running pods, so no container is removed"* ]]
+  [[ "$output" == *"errors=1"* ]]
 }
 
 # What the runtime reports in the image tests: one image a container uses, one a pod
@@ -254,6 +305,69 @@ EOF
   [ "$(grep '^crictl rmi ' "$CALLS" | tr '\n' ' ')" = "crictl rmi sha256:big crictl rmi sha256:mid crictl rmi sha256:small " ]
 }
 
+@test "removes no image when the pod sandboxes cannot be listed" {
+  image_fixtures
+  touch "$CRI_DIR/pods-fail"
+  export HOOVER_STEPS=images
+  run_hoover
+  [ "$status" -eq 1 ]
+  ! grep -q '^crictl rmi ' "$CALLS"
+  [[ "$output" == *"could not list the pod sandboxes"* ]]
+  [[ "$output" == *"so no image is removed"* ]]
+}
+
+@test "removes no image when a sandbox that still exists cannot be inspected" {
+  image_fixtures
+  echo p2 >>"$CRI_DIR/pods"
+  export HOOVER_STEPS=images
+  run_hoover
+  [ "$status" -eq 1 ]
+  ! grep -q '^crictl rmi ' "$CALLS"
+  [[ "$output" == *"could not inspect pod sandbox p2"* ]]
+}
+
+@test "skips a sandbox that is gone by the time it is inspected" {
+  image_fixtures
+  echo p2 >>"$CRI_DIR/pods"
+  echo p1 >"$CRI_DIR/pods-now"
+  export HOOVER_STEPS=images
+  run_hoover
+  [ "$status" -eq 0 ]
+  grep -qx 'crictl rmi sha256:bbb' "$CALLS"
+  [ "$(grep -c '^crictl rmi ' "$CALLS")" -eq 1 ]
+}
+
+@test "removes no image when a running sandbox does not name its image" {
+  image_fixtures
+  echo '{"status": {"state": "SANDBOX_READY"}, "info": {}}' >"$CRI_DIR/pod-p1.json"
+  export HOOVER_STEPS=images
+  run_hoover
+  [ "$status" -eq 1 ]
+  ! grep -q '^crictl rmi ' "$CALLS"
+  [[ "$output" == *"pod sandbox p1 (SANDBOX_READY) does not name its image"* ]]
+}
+
+@test "skips a stopped sandbox that names no image" {
+  image_fixtures
+  echo p2 >>"$CRI_DIR/pods"
+  echo '{"status": {"state": "SANDBOX_NOTREADY"}, "info": {}}' >"$CRI_DIR/pod-p2.json"
+  export HOOVER_STEPS=images
+  run_hoover
+  [ "$status" -eq 0 ]
+  grep -qx 'crictl rmi sha256:bbb' "$CALLS"
+  [ "$(grep -c '^crictl rmi ' "$CALLS")" -eq 1 ]
+}
+
+@test "removes no image when no sandbox names one" {
+  image_fixtures
+  : >"$CRI_DIR/pods"
+  export HOOVER_STEPS=images
+  run_hoover
+  [ "$status" -eq 1 ]
+  ! grep -q '^crictl rmi ' "$CALLS"
+  [[ "$output" == *"no pod sandbox named its image"* ]]
+}
+
 @test "stops removing images once the node is under the image target" {
   image_fixtures
   # Any real filesystem is under 100% used, so nothing needs to go.
@@ -268,7 +382,8 @@ EOF
   mkfile "$H/var/log/big.log" 3
   echo a >"$H/var/log/syslog.1"
   echo c1 >"$CRI_DIR/exited"
-  printf '{"status":{"finishedAt":"%s"}}' "$(date -u -d '3 days ago' +%Y-%m-%dT%H:%M:%SZ)" >"$CRI_DIR/c1.json"
+  exited_container 1 "$(date -u -d '3 days ago' +%Y-%m-%dT%H:%M:%SZ)" s-1 u-1
+  mv "$CRI_DIR/c-1.json" "$CRI_DIR/c1.json"
   image_fixtures
   touch "$H/usr/bin/journalctl"
   chmod +x "$H/usr/bin/journalctl"

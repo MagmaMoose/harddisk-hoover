@@ -10,11 +10,14 @@
 #   - Oversized logs are TRUNCATED, never deleted, so a process writing to one keeps a
 #     valid file handle. Journal files are never touched by the file steps.
 #   - No file that any process on the host holds open is deleted.
-#   - Only containers that EXITED more than HOOVER_EXITED_CONTAINER_MIN_AGE_HOURS ago are
-#     removed, and without --force, so a running container is refused by the runtime.
-#     Recent crashes keep their logs for `kubectl logs --previous`.
+#   - Only containers that EXITED more than HOOVER_EXITED_CONTAINER_MIN_AGE_HOURS ago, of
+#     pods that are gone (their sandbox is no longer Ready), are removed, and without
+#     --force, so a running container is refused by the runtime. A running pod keeps its
+#     init containers' records, and recent crashes keep their logs for
+#     `kubectl logs --previous`.
 #   - Images are removed only when no container, running or exited, and no pod sandbox
-#     uses them. Pinned images are never removed.
+#     uses them. Pinned images are never removed. When the runtime cannot say which
+#     images its sandboxes use, no image is removed.
 #   - The journal is vacuumed by journald's own tool, which only removes archived files.
 #
 # Settings are environment variables; see the README for the full list.
@@ -355,15 +358,37 @@ finished_epoch() {
   esac
 }
 
+# Sandbox ids and pod UIDs of the pods that are still running (sandbox Ready), one per
+# line. Fails when the runtime cannot be asked, so the caller removes nothing.
+ready_pods() {
+  local json
+  json=$(crictl_ pods --state ready -o json) || return 1
+  jq -r '.items // [] | .[] | .id, (.metadata.uid // empty)' <<<"$json"
+}
+
+# A container that exited in a pod that is still running is an init container that has
+# done its work, or the previous instance of one that restarted. The kubelet keeps the
+# last dead instance of each on purpose: without an init container's record it runs the
+# init containers again the next time the pod's main container exits. So only the
+# containers of pods that are gone are removed, and a container whose pod cannot be
+# told is kept.
 step_exited_containers() {
-  local now min_age id info fin ts age name removed=0 kept=0 ids
-  log "== Removing containers that exited more than ${CONTAINER_MIN_AGE_HOURS}h ago"
+  local now min_age id info fin ts age name sandbox uid ready removed=0 kept=0 running=0 ids
+  declare -A READY=()
+  log "== Removing containers of finished pods that exited more than ${CONTAINER_MIN_AGE_HOURS}h ago"
   min_age=$((CONTAINER_MIN_AGE_HOURS * 3600))
   now=$(date +%s)
   if ! ids=$(crictl_ ps -a --state exited -q 2>&1); then
     error "crictl ps failed: $ids"
     return
   fi
+  if ! ready=$(ready_pods); then
+    error "could not list the running pods, so no container is removed"
+    return
+  fi
+  for id in $ready; do
+    READY["$id"]=1
+  done
   for id in $ids; do
     info=$(crictl_ inspect -o json "$id" 2>/dev/null) || continue
     fin=$(jq -r '.status.finishedAt // ""' <<<"$info")
@@ -372,6 +397,16 @@ step_exited_containers() {
     name=$(jq -r '[.status.labels["io.kubernetes.pod.namespace"] // "-", .status.labels["io.kubernetes.pod.name"] // "-", .status.metadata.name // "-"] | join("/")' <<<"$info" 2>/dev/null)
     if ((ts <= 0 || age <= min_age)); then
       kept=$((kept + 1))
+      continue
+    fi
+    sandbox=$(jq -r '.info.sandboxID // ""' <<<"$info" 2>/dev/null)
+    uid=$(jq -r '.status.labels["io.kubernetes.pod.uid"] // ""' <<<"$info" 2>/dev/null)
+    if [[ -z "$sandbox" && -z "$uid" ]]; then
+      kept=$((kept + 1))
+      continue
+    fi
+    if [[ -n "$sandbox" && -n "${READY[$sandbox]:-}" ]] || [[ -n "$uid" && -n "${READY[$uid]:-}" ]]; then
+      running=$((running + 1))
       continue
     fi
     if dry_run; then
@@ -385,9 +420,9 @@ step_exited_containers() {
     removed=$((removed + 1))
   done
   if dry_run; then
-    log "  would remove $removed container(s), keep $kept"
+    log "  would remove $removed container(s), keep $kept, and $running of running pods"
   else
-    log "  removed $removed container(s), kept $kept"
+    log "  removed $removed container(s), kept $kept, and $running of running pods"
   fi
 }
 
@@ -403,14 +438,42 @@ JQ_NORMALISE='def norm:
 # (running or exited, so the exited-containers step decides what is released), and every
 # pod sandbox's image. The last is why this does not use `crictl rmi --prune`: that
 # counts containers only, and a runtime that does not pin its pause image would lose it.
+#
+# Fails closed: if the runtime cannot list its sandboxes, cannot inspect one that still
+# exists, or a running sandbox does not name its image, this returns 1 and the images
+# step removes nothing. A sandbox that is gone by the time it is inspected is skipped
+# (the kubelet removes dead sandboxes all the time), and so is a stopped one that names
+# no image, since a running sandbox protects the image new sandboxes need. This pod runs
+# in a sandbox itself, so finding none at all is also a failure. Reasons go to stderr:
+# stdout is the list.
 unused_images() {
-  local images containers pod sandbox_refs='[]' ref
+  local images containers pods pod info ref state still sandbox_refs='[]'
   images=$(crictl_ images -o json) || return 1
   containers=$(crictl_ ps -a -o json) || return 1
-  for pod in $(crictl_ pods -q) ; do
-    ref=$(crictl_ inspectp -o json "$pod" 2>/dev/null | jq -r '.info.image // empty') || continue
-    [[ -n "$ref" ]] && sandbox_refs=$(jq -c --arg r "$ref" '. + [$r]' <<<"$sandbox_refs")
+  pods=$(crictl_ pods -q) || {
+    log "could not list the pod sandboxes" >&2
+    return 1
+  }
+  for pod in $pods; do
+    if ! info=$(crictl_ inspectp -o json "$pod" 2>/dev/null); then
+      still=$(crictl_ pods -q --id "$pod") || return 1
+      [[ -z "$still" ]] && continue
+      log "could not inspect pod sandbox ${pod:0:13}" >&2
+      return 1
+    fi
+    ref=$(jq -r '.info.image // ""' <<<"$info") || return 1
+    if [[ -z "$ref" ]]; then
+      state=$(jq -r '.status.state // ""' <<<"$info")
+      [[ "$state" == SANDBOX_NOTREADY ]] && continue
+      log "pod sandbox ${pod:0:13} (${state:-no state}) does not name its image" >&2
+      return 1
+    fi
+    sandbox_refs=$(jq -c --arg r "$ref" '. + [$r]' <<<"$sandbox_refs")
   done
+  if [[ "$sandbox_refs" == '[]' ]]; then
+    log "no pod sandbox named its image, so the pause image cannot be told apart" >&2
+    return 1
+  fi
   jq -r --argjson containers "$containers" --argjson sandboxes "$sandbox_refs" "$JQ_NORMALISE"'
     ([$containers.containers[] | .imageRef, .image.image] | map(select(. != null and . != ""))) as $used
     | ($sandboxes | map(norm)) as $sandbox
@@ -435,7 +498,7 @@ step_images() {
     log "== Removing images nothing on the node uses"
   fi
   if ! list=$(unused_images | sort -t $'\t' -k2,2nr); then
-    error "could not list the runtime's images, containers or pods"
+    error "could not tell which images the runtime's containers and pod sandboxes use, so no image is removed"
     return
   fi
   read -r pct _ avail fs_size < <(fs_usage "$HOST$THRESHOLD_PATH")

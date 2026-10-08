@@ -56,7 +56,8 @@ steps:
   journal: true
   # apt-get clean, or dnf / yum / zypper's equivalent.
   packageCache: true
-  # Remove containers that exited more than exitedContainerMinAgeHours ago.
+  # Remove containers that exited more than exitedContainerMinAgeHours ago, of pods that
+  # are gone. A running pod keeps its exited (init) containers.
   exitedContainers: true
   # Remove images that no container (running or exited), no pod sandbox and no pin
   # keeps, largest first, down to limits.imagesTargetPercent.
