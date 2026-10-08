@@ -57,7 +57,7 @@ teardown() {
 }
 
 @test "cleans each Ready, schedulable node in name order, one at a time" {
-  run bash /src/src/controller.sh
+  run bash "$BATS_TEST_DIRNAME/../src/controller.sh"
   # n4 fails, so the run fails.
   [ "$status" -eq 1 ]
   # Leftovers are cleared before anything else.
@@ -79,12 +79,12 @@ EOF
 
 @test "cleans cordoned nodes when told to" {
   export HOOVER_SKIP_UNSCHEDULABLE=false
-  run bash /src/src/controller.sh
+  run bash "$BATS_TEST_DIRNAME/../src/controller.sh"
   grep -q 'delete pod pod-n3' "$CALLS"
 }
 
 @test "passes the node selector through" {
   export HOOVER_NODE_SELECTOR='kubernetes.io/os=linux'
-  run bash /src/src/controller.sh
+  run bash "$BATS_TEST_DIRNAME/../src/controller.sh"
   grep -q 'get nodes -o json -l kubernetes.io/os=linux' "$CALLS"
 }

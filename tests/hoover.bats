@@ -58,7 +58,7 @@ hold_open() {
 }
 
 run_hoover() {
-  run bash /src/src/hoover.sh
+  run bash "$BATS_TEST_DIRNAME/../src/hoover.sh"
 }
 
 @test "skips a node below the threshold and touches nothing" {
