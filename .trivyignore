@@ -1,0 +1,14 @@
+# DS-0026: no HEALTHCHECK. Batch pods that exit when done; Kubernetes owns their lifecycle.
+DS-0026
+
+# KSV-0011 / KSV0011: no CPU limit on the controller, on purpose; memory is limited.
+KSV-0011
+KSV0011
+
+# KSV-0048 / KSV0048: the controller's Role creates and deletes the per-node cleanup pods.
+KSV-0048
+KSV0048
+
+# KSV-0125 / KSV0125: ghcr.io/magmamoose is this project's own registry.
+KSV-0125
+KSV0125

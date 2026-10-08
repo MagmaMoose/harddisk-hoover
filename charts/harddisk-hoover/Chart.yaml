@@ -1,0 +1,36 @@
+apiVersion: v2
+name: harddisk-hoover
+description: Frees disk space on Kubernetes nodes, one node at a time, before the kubelet starts evicting pods.
+type: application
+
+# version is the CHART version and appVersion the application version. The release
+# workflow publishes the chart at the release version with appVersion set to the release
+# tag, so these two are only what a local `helm install ./charts/harddisk-hoover` uses.
+# appVersion is the default image tag and keeps the leading "v" the image tags carry.
+version: 0.1.0
+appVersion: "v0.1.0"
+
+home: https://github.com/MagmaMoose/harddisk-hoover
+sources:
+  - https://github.com/MagmaMoose/harddisk-hoover
+keywords:
+  - disk
+  - cleanup
+  - containerd
+  - k3s
+  - eviction
+  - maintenance
+maintainers:
+  - name: Caleb Sargeant
+    url: https://github.com/CalebSargeant
+
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/category: monitoring-logging
+  artifacthub.io/prerelease: "true"
+  artifacthub.io/links: |
+    - name: Source
+      url: https://github.com/MagmaMoose/harddisk-hoover
+  artifacthub.io/changes: |
+    - kind: added
+      description: First release.

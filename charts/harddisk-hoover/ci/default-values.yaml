@@ -1,0 +1,58 @@
+# Values used by CI to render the chart. Not an example deployment: the point is to
+# exercise as many templates as possible, so what is off by default is on here.
+image:
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+imagePullSecrets:
+  - name: registry
+schedule: "*/30 * * * *"
+timeZone: Europe/Amsterdam
+dryRun: true
+threshold:
+  percent: 60
+nodes:
+  selector: node-role.kubernetes.io/control-plane!=true
+  skipUnschedulable: false
+steps:
+  packageCache: false
+limits:
+  imagesTargetPercent: 50
+  logDirs:
+    - /var/log
+    - /var/lib/rancher/k3s/agent/logs
+criSocket: /run/k3s/containerd/containerd.sock
+serviceAccount:
+  annotations:
+    example.com/owner: platform
+controller:
+  priorityClassName: low
+  podAnnotations:
+    example.com/scrape: "false"
+  podLabels:
+    example.com/team: platform
+  nodeSelector:
+    kubernetes.io/os: linux
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: infra
+      effect: NoSchedule
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 1
+          preference:
+            matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+cleanup:
+  podAnnotations:
+    example.com/scrape: "false"
+  podLabels:
+    example.com/team: platform
+  keepPods: true
+networkPolicy:
+  apiServer:
+    - cidr: 10.43.0.1/32
+      ports: [443]
+    - cidr: 10.0.0.0/24
+      ports: [6443]

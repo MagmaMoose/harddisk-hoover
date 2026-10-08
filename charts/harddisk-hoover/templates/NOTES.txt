@@ -1,0 +1,18 @@
+{{- include "harddisk-hoover.guards" . -}}
+harddisk-hoover sweeps {{ if .Values.nodes.selector }}the nodes matching "{{ .Values.nodes.selector }}"{{ else }}every node{{ end }} one at a time, on "{{ .Values.schedule }}"{{ with .Values.timeZone }} ({{ . }}){{ end }}.
+{{- if .Values.suspend }}
+The CronJob is suspended.
+{{- end }}
+{{- if .Values.dryRun }}
+Dry run: each node's log says what would be freed; nothing is changed.
+{{- end }}
+{{- if gt (int .Values.threshold.percent) 0 }}
+Only nodes whose {{ .Values.threshold.path }} is at least {{ .Values.threshold.percent }}% full are cleaned.
+{{- end }}
+
+The cleanup pods are privileged. The namespace "{{ .Release.Namespace }}" must allow that:
+  kubectl label namespace {{ .Release.Namespace }} pod-security.kubernetes.io/enforce=privileged
+
+Run a sweep now:
+  kubectl -n {{ .Release.Namespace }} create job --from=cronjob/{{ include "harddisk-hoover.fullname" . }} {{ include "harddisk-hoover.fullname" . | trunc 40 | trimSuffix "-" }}-manual
+  kubectl -n {{ .Release.Namespace }} logs -f job/{{ include "harddisk-hoover.fullname" . | trunc 40 | trimSuffix "-" }}-manual

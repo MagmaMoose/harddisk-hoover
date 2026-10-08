@@ -1,0 +1,299 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "definitions": {
+    "size": {
+      "type": "string",
+      "pattern": "^[0-9]+[KMGT]?$",
+      "description": "A size in bytes, or with a K, M, G or T suffix (powers of 1024)."
+    },
+    "resources": {
+      "type": "object"
+    },
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "properties": {
+    "global": {
+      "type": "object"
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^(sha256:[a-f0-9]{64})?$"
+        },
+        "pullPolicy": {
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array"
+    },
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "schedule": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timeZone": {
+      "type": "string"
+    },
+    "suspend": {
+      "type": "boolean"
+    },
+    "dryRun": {
+      "type": "boolean"
+    },
+    "threshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "percent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/"
+        }
+      }
+    },
+    "nodes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "selector": {
+          "type": "string"
+        },
+        "skipUnschedulable": {
+          "type": "boolean"
+        },
+        "podTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 60
+        },
+        "pauseSeconds": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "steps": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "logs": {
+          "type": "boolean"
+        },
+        "archivedLogs": {
+          "type": "boolean"
+        },
+        "podLogs": {
+          "type": "boolean"
+        },
+        "coreDumps": {
+          "type": "boolean"
+        },
+        "journal": {
+          "type": "boolean"
+        },
+        "packageCache": {
+          "type": "boolean"
+        },
+        "exitedContainers": {
+          "type": "boolean"
+        },
+        "images": {
+          "type": "boolean"
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "logDirs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^/"
+          }
+        },
+        "logMaxSize": {
+          "$ref": "#/definitions/size"
+        },
+        "podLogMaxAgeDays": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "coreDumpMinSize": {
+          "$ref": "#/definitions/size"
+        },
+        "journalMaxSize": {
+          "$ref": "#/definitions/size"
+        },
+        "exitedContainerMinAgeHours": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "imagesTargetPercent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "criSocket": {
+      "type": "string"
+    },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "annotations": {
+          "$ref": "#/definitions/stringMap"
+        }
+      }
+    },
+    "controller": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "priorityClassName": {
+          "type": "string"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "podSecurityContext": {
+          "type": "object"
+        },
+        "securityContext": {
+          "type": "object"
+        },
+        "podAnnotations": {
+          "$ref": "#/definitions/stringMap"
+        },
+        "podLabels": {
+          "$ref": "#/definitions/stringMap"
+        },
+        "nodeSelector": {
+          "$ref": "#/definitions/stringMap"
+        },
+        "tolerations": {
+          "type": "array"
+        },
+        "affinity": {
+          "type": "object"
+        },
+        "activeDeadlineSeconds": {
+          "type": "integer",
+          "minimum": 60
+        },
+        "startingDeadlineSeconds": {
+          "type": "integer",
+          "minimum": 10
+        },
+        "successfulJobsHistoryLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failedJobsHistoryLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ttlSecondsAfterFinished": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "priorityClassName": {
+          "type": "string"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "tolerations": {
+          "type": "array"
+        },
+        "podAnnotations": {
+          "$ref": "#/definitions/stringMap"
+        },
+        "podLabels": {
+          "$ref": "#/definitions/stringMap"
+        },
+        "keepPods": {
+          "type": "boolean"
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "apiServer": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cidr",
+              "ports"
+            ],
+            "properties": {
+              "cidr": {
+                "type": "string",
+                "minLength": 1
+              },
+              "ports": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

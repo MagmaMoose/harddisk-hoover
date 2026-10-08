@@ -1,0 +1,152 @@
+# values.schema.json checks the shape of these; templates/_guards.tpl fails the render on
+# combinations that cannot work.
+
+image:
+  repository: ghcr.io/magmamoose/harddisk-hoover
+  # Empty means the chart's appVersion.
+  tag: ""
+  # sha256:... pins the image by digest as well as tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# When the sweep runs, in cron syntax, and the time zone that reads it in (empty: the
+# kube-controller-manager's, usually UTC).
+schedule: "17 3 * * *"
+timeZone: ""
+suspend: false
+
+# Report what each step would free and change nothing.
+dryRun: false
+
+threshold:
+  # Clean a node only when its filesystem at `path` is at least this full, counting
+  # either space or inodes. "Full" means not available, the way the kubelet's
+  # nodefs.available eviction signal sees it. 0 cleans every node on every run.
+  percent: 0
+  path: /
+
+nodes:
+  # Label selector for the nodes to sweep, as for `kubectl get nodes -l`. Nodes that are
+  # not Ready are always skipped.
+  selector: kubernetes.io/os=linux
+  # Leave cordoned nodes alone: they are usually being drained, and a bare pod there
+  # can hold up the drain.
+  skipUnschedulable: true
+  # How long one node's cleanup may take before the controller gives up on it.
+  podTimeoutSeconds: 900
+  # Seconds between one node finishing and the next starting.
+  pauseSeconds: 5
+
+# What the cleanup does, in this order. Turn off any step you do not want.
+steps:
+  # Truncate (never delete) files in logDirs that use more than logMaxSize.
+  logs: true
+  # Delete rotated and compressed logs (*.gz, *.xz, *.bz2, *.zst, *.N) in logDirs.
+  archivedLogs: true
+  # Delete /var/log/pods files untouched for podLogMaxAgeDays.
+  podLogs: true
+  # Delete core.<pid> files over coreDumpMinSize in /var/log and in running containers'
+  # writable layers, and everything in /var/lib/systemd/coredump.
+  coreDumps: true
+  # journalctl --vacuum-size=journalMaxSize, on nodes that have journald.
+  journal: true
+  # apt-get clean, or dnf / yum / zypper's equivalent.
+  packageCache: true
+  # Remove containers that exited more than exitedContainerMinAgeHours ago, of pods that
+  # are gone. A running pod keeps its exited (init) containers.
+  exitedContainers: true
+  # Remove images that no container (running or exited), no pod sandbox and no pin
+  # keeps, largest first, down to limits.imagesTargetPercent.
+  images: true
+
+limits:
+  # Where the logs and archivedLogs steps look. /var/log is searched whole; any other
+  # directory one level deep and only for names containing ".log".
+  logDirs:
+    - /var/log
+  logMaxSize: 100M
+  podLogMaxAgeDays: 7
+  coreDumpMinSize: 50M
+  journalMaxSize: 100M
+  exitedContainerMinAgeHours: 24
+  # The images step removes unused images largest first and stops once threshold.path is
+  # at most this full, so the rest stay cached and are not pulled again. 0 removes every
+  # unused image.
+  imagesTargetPercent: 0
+
+# The container runtime's socket on the node. Empty finds it: k3s, RKE2, containerd,
+# CRI-O, k0s and MicroK8s locations are tried in turn.
+criSocket: ""
+
+serviceAccount:
+  annotations: {}
+
+# The CronJob's pod, which walks the nodes. It needs the Kubernetes API and nothing on
+# the node.
+controller:
+  priorityClassName: ""
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # Upper bound for a whole sweep. Size it for your node count times podTimeoutSeconds.
+  activeDeadlineSeconds: 7200
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  ttlSecondsAfterFinished: 86400
+
+# The pod that runs on each node in turn. It is privileged, shares the host's PID
+# namespace and mounts the host's root filesystem: that is what cleaning a node takes.
+# Put the release in a namespace whose Pod Security level is privileged.
+cleanup:
+  # system-node-critical, because the kubelet admits only critical pods while the node
+  # is under DiskPressure, which is exactly when the cleanup matters most.
+  priorityClassName: system-node-critical
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  # Run on every node, whatever its taints.
+  tolerations:
+    - operator: Exists
+  podAnnotations: {}
+  podLabels: {}
+  # Keep each finished cleanup pod for debugging instead of deleting it.
+  keepPods: false
+
+networkPolicy:
+  # Ingress to nothing, egress from the cleanup pods to nothing, and egress from the
+  # controller only to the Kubernetes API. Off if your CNI ignores NetworkPolicy.
+  enabled: true
+  # Where the controller may reach the API server. After kube-proxy's DNAT the
+  # destination is a control-plane node, often on 6443, so list both the Service and the
+  # nodes when you narrow this.
+  apiServer:
+    - cidr: 0.0.0.0/0
+      ports: [443, 6443]

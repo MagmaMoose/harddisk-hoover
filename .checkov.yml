@@ -1,0 +1,20 @@
+# Checkov settings for Chargate's MegaLinter run. MegaLinter uses this file INSTEAD of its
+# own default, so the default's two settings (quiet, CKV_DOCKER_2) are repeated here.
+quiet: true
+skip-check:
+  # No HEALTHCHECK: both roles are batch pods that exit when done.
+  - CKV_DOCKER_2
+  # No CPU limit on the controller, on purpose: a throttled controller only takes longer,
+  # and its memory is limited.
+  - CKV_K8S_11
+  # imagePullPolicy defaults to IfNotPresent because the image is meant to be pinned by
+  # digest (image.digest); Always would only add a registry round trip per pod.
+  - CKV_K8S_15
+  # Every namespaced object goes in the release namespace. "default" is only what an
+  # unnamespaced `helm template` shows.
+  - CKV_K8S_21
+  # The controller calls the Kubernetes API, so it is the one pod that mounts a token.
+  - CKV_K8S_38
+  # image.digest pins the image; the chart cannot know the digest of a release it is
+  # packaged with, so it is empty until the consumer sets it.
+  - CKV_K8S_43
