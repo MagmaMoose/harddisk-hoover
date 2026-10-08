@@ -393,7 +393,7 @@ step_exited_containers() {
 # docker.io/ for a name with no registry host.
 JQ_NORMALISE='def norm:
   if test("^sha256:") then .
-  elif test("^[^/]+[.:][^/]*/") or startswith("localhost/") then .
+  elif test("^[^/]+[.:][^/]*/") or startswith("localhost/") then .  # DevSkim: ignore DS162092
   elif contains("/") then "docker.io/" + .
   else "docker.io/library/" + . end;'
 

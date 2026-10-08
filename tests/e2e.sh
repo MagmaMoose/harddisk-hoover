@@ -68,13 +68,15 @@ EOF
     ;;
   k3s)
     log "starting k3s ($K3S_IMAGE) in Docker"
+    # The test cluster's API server, on a random loopback port.
+    api_port_mapping="127.0.0.1::6443" # DevSkim: ignore DS162092
     docker run -d --name "$NAME" --hostname "$NAME" --privileged --tmpfs /run --tmpfs /var/run \
       -e K3S_KUBECONFIG_OUTPUT=/output/kubeconfig -e K3S_KUBECONFIG_MODE=644 \
-      -v "$WORK:/output" -p 127.0.0.1::6443 \
+      -v "$WORK:/output" -p "$api_port_mapping" \
       "$K3S_IMAGE" server --disable=traefik,metrics-server,servicelb >/dev/null
     for _ in $(seq 60); do [[ -s "$WORK/kubeconfig" ]] && break; sleep 2; done
     port=$(docker port "$NAME" 6443/tcp | head -n 1 | sed 's/.*://')
-    sed -i.bak "s#https://127.0.0.1:6443#https://127.0.0.1:${port}#" "$KUBECONFIG"
+    sed -i.bak "s#https://127.0.0.1:6443#https://127.0.0.1:${port}#" "$KUBECONFIG" # DevSkim: ignore DS162092
     for _ in $(seq 60); do kubectl get nodes 2>/dev/null | grep -q ' Ready' && break; sleep 2; done
     docker save "$image" | docker exec -i "$NAME" ctr -n k8s.io images import - >/dev/null
     nodes=("$NAME")
