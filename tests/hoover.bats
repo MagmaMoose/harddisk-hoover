@@ -290,6 +290,24 @@ EOF
   [[ "$output" == *"removed 1 image(s)"* ]]
 }
 
+@test "handles a container list larger than one command-line argument may be" {
+  image_fixtures
+  # 3000 exited containers: about 300 KiB of JSON, over the 128 KiB per-argument limit.
+  python3 - "$CRI_DIR/ps.json" <<'PY'
+import json, sys
+cs = [{"imageRef": "sha256:aaa", "image": {"image": "sha256:aaa"}, "id": "c%05d" % i,
+       "metadata": {"name": "container-with-a-fairly-long-name-%05d" % i}} for i in range(3000)]
+json.dump({"containers": cs}, open(sys.argv[1], "w"))
+PY
+  [ "$(stat -c %s "$CRI_DIR/ps.json")" -gt 131072 ]
+  export HOOVER_STEPS=images
+  run_hoover
+  [ "$status" -eq 0 ]
+  grep -qx 'crictl rmi sha256:bbb' "$CALLS"
+  [ "$(grep -c '^crictl rmi ' "$CALLS")" -eq 1 ]
+  [[ "$output" != *"Argument list too long"* ]]
+}
+
 @test "removes the largest unused image first" {
   image_fixtures
   cat >"$CRI_DIR/images.json" <<'EOF'
