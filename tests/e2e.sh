@@ -74,6 +74,10 @@ EOF
       -e K3S_KUBECONFIG_OUTPUT=/output/kubeconfig -e K3S_KUBECONFIG_MODE=644 \
       -v "$WORK:/output" -p "$api_port_mapping" \
       "$K3S_IMAGE" server --disable=traefik,metrics-server,servicelb >/dev/null
+    # The cleanup pod mounts the node's / with HostToContainer propagation, which containerd
+    # refuses on a private mount. systemd makes / shared on a real node (kind's entrypoint
+    # does the same); Docker gives this container a private /, so share it here.
+    docker exec "$NAME" mount --make-rshared /
     for _ in $(seq 60); do [[ -s "$WORK/kubeconfig" ]] && break; sleep 2; done
     port=$(docker port "$NAME" 6443/tcp | head -n 1 | sed 's/.*://')
     sed -i.bak "s#https://127.0.0.1:6443#https://127.0.0.1:${port}#" "$KUBECONFIG" # DevSkim: ignore DS162092

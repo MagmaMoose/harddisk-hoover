@@ -167,8 +167,12 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       volumeMounts:
+        {{- /* HostToContainer: a volume the node unmounts while the cleanup runs (a CSI
+        or Longhorn unstage) is unmounted here too, so this pod never keeps its block
+        device busy. Needs / to be a shared mount on the node, the systemd default. */}}
         - name: host
           mountPath: /host
+          mountPropagation: HostToContainer
         - name: tmp
           mountPath: /tmp
   volumes:
