@@ -138,6 +138,23 @@ jobs:
           defectdojo-api-key: ${{ secrets.MM_DEFECTDOJO_API_KEY }}
           defectdojo-product-name: ${{ github.event.repository.name }}
           defectdojo-product-type: 'Research and Development'
+          # Helm chart publishing, switched on for this repo by `helm_chart_path` in
+          # MagmaMoose/admin. A new GHCR chart package starts PRIVATE: make it public
+          # after the first release, or Artifact Hub lists a repository with nothing
+          # in it (the run warns). The listing is skipped while the
+          # MM_ARTIFACTHUB_API_KEY_* secrets are unset; artifacthub-repo.yml is
+          # pushed once the repo has one, carrying the repositoryID the first
+          # listing reports.
+          publish-package: 'true'
+          package-ecosystem: helm
+          package-path: charts/harddisk-hoover
+          helm-app-version: tag
+          helm-lint: 'true'
+          helm-sign: 'true'
+          artifacthub-repo-file: ${{ hashFiles('artifacthub-repo.yml') != '' && 'artifacthub-repo.yml' || '' }}
+          artifacthub-api-key-id: ${{ secrets.MM_ARTIFACTHUB_API_KEY_ID }}
+          artifacthub-api-key-secret: ${{ secrets.MM_ARTIFACTHUB_API_KEY_SECRET }}
+          artifacthub-org: ${{ vars.MM_ARTIFACTHUB_ORG }}
       # Keep the floating major tag (v1, v2, ...) on the newest stable release, so
       # `uses: owner/repo@v2` means something. Nothing moved it before: chargate's
       # `v2` was set once and sat on v2.11.1 while the repo shipped v2.11.28, and
